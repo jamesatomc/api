@@ -3,7 +3,7 @@ use dotenv::dotenv;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 
 mod services;
-use services::{get_user, init_db, register_user, login_user, add_product, list_products, add_to_cart, remove_from_cart};
+use services::{get_user, init_db, register_user, login_user, add_product, list_products, add_to_cart, remove_from_cart, checkout};
 
 pub struct AppState {
     db: Pool<Postgres>
@@ -32,6 +32,7 @@ async fn main() -> std::io::Result<()> {
             .service(list_products)
             .service(add_to_cart)
             .service(remove_from_cart)
+            .service(checkout)
     })
     .bind(("127.0.0.1", 8080))?
     .run()

@@ -230,7 +230,66 @@ pub async fn remove_from_cart(state: Data<AppState>, body: Json<CartItemBody>) -
     }
 }
 
+#[post("/checkout")]
+pub async fn checkout(state: Data<AppState>, body: Json<PurchaseBody>) -> impl Responder {
+    let mut transaction = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            eprintln!("Error starting transaction: {:?}", e);
+            return HttpResponse::InternalServerError().json("Failed to start transaction");
+        }
+    };
 
+    let cart_items: Vec<CartItem> = match sqlx::query_as::<_, CartItem>(
+        "SELECT id, user_id, product_id, quantity FROM cart_items WHERE user_id = $1"
+    )
+    .bind(&body.user_id)
+    .fetch_all(&mut *transaction)
+    .await
+    {
+        Ok(items) => items,
+        Err(e) => {
+            eprintln!("Error fetching cart items: {:?}", e);
+            let _ = transaction.rollback().await;
+            return HttpResponse::InternalServerError().json("Failed to fetch cart items");
+        },
+    };
+
+    for item in cart_items {
+        if let Err(e) = sqlx::query_as::<_, Purchase>(
+            "INSERT INTO purchases (user_id, product_id, quantity) VALUES ($1, $2, $3) RETURNING id, user_id, product_id, quantity"
+        )
+        .bind(&item.user_id)
+        .bind(&item.product_id)
+        .bind(&item.quantity)
+        .fetch_one(&mut *transaction)
+        .await
+        {
+            eprintln!("Error making purchase: {:?}", e);
+            let _ = transaction.rollback().await;
+            return HttpResponse::InternalServerError().json("Failed to make purchase");
+        }
+
+        if let Err(e) = sqlx::query(
+            "DELETE FROM cart_items WHERE id = $1"
+        )
+        .bind(&item.id)
+        .execute(&mut *transaction)
+        .await
+        {
+            eprintln!("Error clearing cart: {:?}", e);
+            let _ = transaction.rollback().await;
+            return HttpResponse::InternalServerError().json("Failed to clear cart");
+        }
+    }
+
+    if let Err(e) = transaction.commit().await {
+        eprintln!("Error committing transaction: {:?}", e);
+        return HttpResponse::InternalServerError().json("Failed to commit transaction");
+    }
+
+    HttpResponse::Ok().json("Checkout successful")
+}
 
 #[get("/user/{id}")]
 pub async fn get_user(state: Data<AppState>, user_id: Path<i32>) -> impl Responder {
