@@ -9,6 +9,7 @@ struct User {
     id: i32,
     first_name: String,
     last_name: String,
+    username: String,
     email: String,
     password: String,
 }
@@ -43,13 +44,15 @@ struct CartItem {
 pub struct RegisterUserBody {
     pub first_name: String,
     pub last_name: String,
+    pub username: String,
     pub email: String,
     pub password: String,
 }
 
 #[derive(Deserialize)]
 pub struct LoginUserBody {
-    pub email: String,
+    pub username: Option<String>,
+    pub email: Option<String>,
     pub password: String,
 }
 
@@ -83,6 +86,7 @@ async fn create_tables_if_not_exist(pool: &sqlx::PgPool) -> Result<(), sqlx::Err
             id SERIAL PRIMARY KEY,
             first_name VARCHAR(255) NOT NULL,
             last_name VARCHAR(255) NOT NULL,
+            username VARCHAR(255) NOT NULL UNIQUE,
             email VARCHAR(255) NOT NULL UNIQUE,
             password VARCHAR(255) NOT NULL
         );
@@ -121,33 +125,66 @@ pub async fn register_user(state: Data<AppState>, body: Json<RegisterUserBody>) 
     let salt = b"randomsalt"; // In a real application, generate a unique salt for each user
     let hashed_password = argon2::hash_encoded(body.password.as_bytes(), salt, &config).unwrap();
 
-    match sqlx::query_as::<_, User>(
-        "INSERT INTO users (first_name, last_name, email, password) VALUES ($1, $2, $3, $4) RETURNING id, first_name, last_name, email, password"
+    // ตรวจสอบว่ามี email หรือ username ซ้ำกันหรือไม่
+    let existing_user = sqlx::query_as::<_, User>(
+        "SELECT id, first_name, last_name, username, email, password FROM users WHERE email = $1 OR username = $2"
     )
-    .bind(&body.first_name)
-    .bind(&body.last_name)
     .bind(&body.email)
-    .bind(&hashed_password)
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(user) => HttpResponse::Ok().json(user),
+    .bind(&body.username)
+    .fetch_optional(&state.db)
+    .await;
+
+    match existing_user {
+        Ok(Some(_)) => {
+            // หากมีการซ้ำกัน ส่งข้อความแสดงข้อผิดพลาดกลับไป
+            HttpResponse::BadRequest().json("Email or username already exists")
+        },
+        Ok(None) => {
+            // หากไม่มีการซ้ำกัน ดำเนินการลงทะเบียนผู้ใช้ใหม่
+            match sqlx::query_as::<_, User>(
+                "INSERT INTO users (first_name, last_name, username, email, password) VALUES ($1, $2, $3, $4, $5) RETURNING id, first_name, last_name, username, email, password"
+            )
+            .bind(&body.first_name)
+            .bind(&body.last_name)
+            .bind(&body.username)
+            .bind(&body.email)
+            .bind(&hashed_password)
+            .fetch_one(&state.db)
+            .await
+            {
+                Ok(user) => HttpResponse::Ok().json(user),
+                Err(e) => {
+                    eprintln!("Error registering user: {:?}", e);
+                    HttpResponse::InternalServerError().json("Failed to register user")
+                },
+            }
+        },
         Err(e) => {
-            eprintln!("Error registering user: {:?}", e);
-            HttpResponse::InternalServerError().json("Failed to register user")
+            eprintln!("Error checking existing user: {:?}", e);
+            HttpResponse::InternalServerError().json("Failed to check existing user")
         },
     }
 }
 
 #[post("/login")]
 pub async fn login_user(state: Data<AppState>, body: Json<LoginUserBody>) -> impl Responder {
-    match sqlx::query_as::<_, User>(
-        "SELECT id, first_name, last_name, email, password FROM users WHERE email = $1"
-    )
-    .bind(&body.email)
-    .fetch_one(&state.db)
-    .await
-    {
+    let user_query = if let Some(email) = &body.email {
+        sqlx::query_as::<_, User>(
+            "SELECT id, first_name, last_name, username, email, password FROM users WHERE email = $1"
+        )
+        .bind(email)
+    } else if let Some(username) = &body.username {
+        sqlx::query_as::<_, User>(
+            "SELECT id, first_name, last_name, username, email, password FROM users WHERE username = $1"
+        )
+        .bind(username)
+    } else {
+        return HttpResponse::BadRequest().json("Either email or username must be provided");
+    };
+
+    let user = user_query.fetch_one(&state.db).await;
+
+    match user {
         Ok(user) => {
             if argon2::verify_encoded(&user.password, body.password.as_bytes()).unwrap() {
                 HttpResponse::Ok().json(user)
@@ -297,7 +334,7 @@ pub async fn checkout(state: Data<AppState>, body: Json<PurchaseBody>) -> impl R
 #[get("/user/{id}")]
 pub async fn get_user(state: Data<AppState>, user_id: Path<i32>) -> impl Responder {
     match sqlx::query_as::<_, User>(
-        "SELECT id, first_name, last_name, email, password FROM users WHERE id = $1"
+        "SELECT id, first_name, last_name, username, email, password FROM users WHERE id = $1"
     )
     .bind(user_id.into_inner())
     .fetch_one(&state.db)
@@ -305,6 +342,22 @@ pub async fn get_user(state: Data<AppState>, user_id: Path<i32>) -> impl Respond
     {
         Ok(user) => HttpResponse::Ok().json(user),
         Err(_) => HttpResponse::NotFound().json("User not found"),
+    }
+}
+
+#[get("/users")]
+pub async fn get_all_users(state: Data<AppState>) -> impl Responder {
+    match sqlx::query_as::<_, User>(
+        "SELECT id, first_name, last_name, username, email, password FROM users"
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(users) => HttpResponse::Ok().json(users),
+        Err(e) => {
+            eprintln!("Error fetching users: {:?}", e);
+            HttpResponse::InternalServerError().json("Failed to fetch users")
+        },
     }
 }
 

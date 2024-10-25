@@ -3,7 +3,7 @@ use dotenv::dotenv;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 
 mod services;
-use services::{get_user, init_db, register_user, login_user, add_product, list_products, add_to_cart, remove_from_cart, checkout};
+use services::{get_user, get_all_users, init_db, register_user, login_user, add_product, list_products, add_to_cart, remove_from_cart, checkout};
 
 pub struct AppState {
     db: Pool<Postgres>
@@ -26,6 +26,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(Data::new(AppState { db: pool.clone() }))
             .service(get_user)
+            .service(get_all_users)
             .service(register_user)
             .service(login_user)
             .service(add_product)
