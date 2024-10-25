@@ -1,12 +1,7 @@
-use actix_web::{
-    get, post,
-    web::{Data, Json, Path},
-    Responder, HttpResponse
-};
+use actix_web::{get, post, delete, web::{Data, Json, Path}, Responder, HttpResponse};
 use serde::{Deserialize, Serialize};
 use sqlx::{self, FromRow, Executor};
 use crate::AppState;
-use bcrypt::{hash, verify, DEFAULT_COST};
 
 #[derive(Serialize, FromRow)]
 struct User {
@@ -29,6 +24,14 @@ struct Product {
 
 #[derive(Serialize, FromRow)]
 struct Purchase {
+    id: i32,
+    user_id: i32,
+    product_id: i32,
+    quantity: i32,
+}
+
+#[derive(Serialize, FromRow)]
+struct CartItem {
     id: i32,
     user_id: i32,
     product_id: i32,
@@ -65,6 +68,13 @@ pub struct PurchaseBody {
     pub quantity: i32,
 }
 
+#[derive(Deserialize)]
+pub struct CartItemBody {
+    pub user_id: i32,
+    pub product_id: i32,
+    pub quantity: i32,
+}
+
 async fn create_tables_if_not_exist(pool: &sqlx::PgPool) -> Result<(), sqlx::Error> {
     pool.execute(
         r#"
@@ -91,6 +101,14 @@ async fn create_tables_if_not_exist(pool: &sqlx::PgPool) -> Result<(), sqlx::Err
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
         );
+        CREATE TABLE IF NOT EXISTS cart_items (
+            id SERIAL PRIMARY KEY,
+            user_id INT NOT NULL,
+            product_id INT NOT NULL,
+            quantity INT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (product_id) REFERENCES products(id)
+        );
         "#,
     ).await?;
     Ok(())
@@ -98,7 +116,7 @@ async fn create_tables_if_not_exist(pool: &sqlx::PgPool) -> Result<(), sqlx::Err
 
 #[post("/register")]
 pub async fn register_user(state: Data<AppState>, body: Json<RegisterUserBody>) -> impl Responder {
-    let hashed_password = hash(&body.password, DEFAULT_COST).unwrap();
+    let hashed_password = bcrypt::hash(&body.password, bcrypt::DEFAULT_COST).unwrap();
 
     match sqlx::query_as::<_, User>(
         "INSERT INTO users (first_name, last_name, email, password) VALUES ($1, $2, $3, $4) RETURNING id, first_name, last_name, email, password"
@@ -128,7 +146,7 @@ pub async fn login_user(state: Data<AppState>, body: Json<LoginUserBody>) -> imp
     .await
     {
         Ok(user) => {
-            if verify(&body.password, &user.password).unwrap() {
+            if bcrypt::verify(&body.password, &user.password).unwrap() {
                 HttpResponse::Ok().json(user)
             } else {
                 HttpResponse::Unauthorized().json("Invalid credentials")
@@ -175,10 +193,10 @@ pub async fn list_products(state: Data<AppState>) -> impl Responder {
     }
 }
 
-#[post("/purchase")]
-pub async fn purchase_product(state: Data<AppState>, body: Json<PurchaseBody>) -> impl Responder {
-    match sqlx::query_as::<_, Purchase>(
-        "INSERT INTO purchases (user_id, product_id, quantity) VALUES ($1, $2, $3) RETURNING id, user_id, product_id, quantity"
+#[post("/cart/add")]
+pub async fn add_to_cart(state: Data<AppState>, body: Json<CartItemBody>) -> impl Responder {
+    match sqlx::query_as::<_, CartItem>(
+        "INSERT INTO cart_items (user_id, product_id, quantity) VALUES ($1, $2, $3) RETURNING id, user_id, product_id, quantity"
     )
     .bind(&body.user_id)
     .bind(&body.product_id)
@@ -186,13 +204,33 @@ pub async fn purchase_product(state: Data<AppState>, body: Json<PurchaseBody>) -
     .fetch_one(&state.db)
     .await
     {
-        Ok(purchase) => HttpResponse::Ok().json(purchase),
+        Ok(cart_item) => HttpResponse::Ok().json(cart_item),
         Err(e) => {
-            eprintln!("Error making purchase: {:?}", e);
-            HttpResponse::InternalServerError().json("Failed to make purchase")
+            eprintln!("Error adding to cart: {:?}", e);
+            HttpResponse::InternalServerError().json("Failed to add to cart")
         },
     }
 }
+
+#[delete("/cart/remove")]
+pub async fn remove_from_cart(state: Data<AppState>, body: Json<CartItemBody>) -> impl Responder {
+    match sqlx::query(
+        "DELETE FROM cart_items WHERE user_id = $1 AND product_id = $2"
+    )
+    .bind(&body.user_id)
+    .bind(&body.product_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(_) => HttpResponse::Ok().json("Item removed from cart"),
+        Err(e) => {
+            eprintln!("Error removing from cart: {:?}", e);
+            HttpResponse::InternalServerError().json("Failed to remove from cart")
+        },
+    }
+}
+
+
 
 #[get("/user/{id}")]
 pub async fn get_user(state: Data<AppState>, user_id: Path<i32>) -> impl Responder {
