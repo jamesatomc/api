@@ -2,6 +2,7 @@ use actix_web::{get, post, delete, web::{Data, Json, Path}, Responder, HttpRespo
 use serde::{Deserialize, Serialize};
 use sqlx::{self, FromRow, Executor};
 use crate::AppState;
+use argon2::{self, Config};
 
 #[derive(Serialize, FromRow)]
 struct User {
@@ -116,7 +117,9 @@ async fn create_tables_if_not_exist(pool: &sqlx::PgPool) -> Result<(), sqlx::Err
 
 #[post("/register")]
 pub async fn register_user(state: Data<AppState>, body: Json<RegisterUserBody>) -> impl Responder {
-    let hashed_password = bcrypt::hash(&body.password, bcrypt::DEFAULT_COST).unwrap();
+    let config = Config::default();
+    let salt = b"randomsalt"; // In a real application, generate a unique salt for each user
+    let hashed_password = argon2::hash_encoded(body.password.as_bytes(), salt, &config).unwrap();
 
     match sqlx::query_as::<_, User>(
         "INSERT INTO users (first_name, last_name, email, password) VALUES ($1, $2, $3, $4) RETURNING id, first_name, last_name, email, password"
@@ -146,7 +149,7 @@ pub async fn login_user(state: Data<AppState>, body: Json<LoginUserBody>) -> imp
     .await
     {
         Ok(user) => {
-            if bcrypt::verify(&body.password, &user.password).unwrap() {
+            if argon2::verify_encoded(&user.password, body.password.as_bytes()).unwrap() {
                 HttpResponse::Ok().json(user)
             } else {
                 HttpResponse::Unauthorized().json("Invalid credentials")
