@@ -1,0 +1,15 @@
+[package]
+name = "api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+tokio = { version = "1.41.0", features = ["full"] }
+sqlx = { version = "0.8.2", features = ["postgres", "runtime-tokio-rustls"] }
+serde = { version = "1.0.132", features = ["derive"] }
+dotenv = "0.15.0"
+actix = "0.13.5"
+actix-web = "4.9.0"
+serde_json = "1.0.132"
+bcrypt = "0.10"
