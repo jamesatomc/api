@@ -1,14 +1,12 @@
 use actix_web::{web::Data, App, HttpServer};
-use actix_web_httpauth::middleware::HttpAuthentication;
+
 use dotenv::dotenv;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 
 mod services;
 mod jwt;
-mod middleware;
 
 use services::{get_user, get_all_users, init_db, register_user, login_user, add_product, list_products, add_to_cart, remove_from_cart, checkout};
-use crate::middleware::jwt_middleware;
 
 pub struct AppState {
     db: Pool<Postgres>
@@ -28,12 +26,10 @@ async fn main() -> std::io::Result<()> {
     init_db(Data::new(AppState { db: pool.clone() })).await.expect("Failed to initialize the database");
 
     HttpServer::new(move || {
-
-        let auth = HttpAuthentication::bearer(jwt_middleware);
-
+        
         App::new()
             .app_data(Data::new(AppState { db: pool.clone() }))
-            .wrap(auth)
+
             .service(get_user)
             .service(get_all_users)
             .service(register_user)
