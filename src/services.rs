@@ -1,4 +1,4 @@
-use actix_web::{get, post, delete, web::{Data, Json, Path}, Responder, HttpResponse};
+use actix_web::{get, post, delete, web::{Data, Json, Path}, Responder, HttpResponse, put};
 use serde::{Deserialize, Serialize};
 use sqlx::{self, FromRow, Executor};
 use crate::AppState;
@@ -232,6 +232,47 @@ pub async fn list_products(state: Data<AppState>) -> impl Responder {
         Err(e) => {
             eprintln!("Error fetching products: {:?}", e);
             HttpResponse::InternalServerError().json("Failed to fetch products")
+        },
+    }
+}
+
+#[delete("/product/{id}")]
+pub async fn delete_product(state: Data<AppState>, product_id: Path<i32>) -> impl Responder {
+    match sqlx::query("DELETE FROM products WHERE id = $1")
+        .bind(product_id.into_inner())
+        .execute(&state.db)
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().json("Product deleted successfully"),
+        Err(e) => {
+            eprintln!("Error deleting product: {:?}", e);
+            HttpResponse::InternalServerError().json("Failed to delete product")
+        },
+    }
+}
+
+#[put("/product/{id}")]
+pub async fn update_product(
+    state: Data<AppState>,
+    product_id: Path<i32>,
+    body: Json<AddProductBody>,
+) -> impl Responder {
+    match sqlx::query_as::<_, Product>(
+        "UPDATE products SET name = $1, category = $2, brand = $3, quantity = $4, price = $5 WHERE id = $6 RETURNING id, name, category, brand, quantity, price"
+    )
+    .bind(&body.name)
+    .bind(&body.category)
+    .bind(&body.brand)
+    .bind(&body.quantity)
+    .bind(&body.price)
+    .bind(product_id.into_inner())
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(product) => HttpResponse::Ok().json(product),
+        Err(e) => {
+            eprintln!("Error updating product: {:?}", e);
+            HttpResponse::InternalServerError().json("Failed to update product")
         },
     }
 }
