@@ -8,7 +8,7 @@ mod jwt;
 
 use services::{
     get_user, get_all_users, init_db, register_user, login_user, add_product, list_products,
-    add_to_cart, remove_from_cart, checkout, delete_product, update_product
+    add_to_cart, remove_from_cart, checkout, delete_product, update_product, add_shipping_address, get_shipping_address
 };
 
 pub struct AppState {
@@ -46,11 +46,15 @@ async fn main() -> std::io::Result<()> {
             // Checkout
             .service(checkout)
             
-             // Products
+            // Products
             .service(add_product)
             .service(list_products)
             .service(delete_product)
             .service(update_product)
+            
+            // Shipping Address
+            .service(add_shipping_address)
+            .service(get_shipping_address)
     })
     .bind(("127.0.0.1", 8080))?
     .run()

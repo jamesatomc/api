@@ -16,6 +16,20 @@ struct User {
 }
 
 #[derive(Serialize, FromRow)]
+struct ShippingAddress {
+    id: i32,
+    user_id: i32,
+    username: String,
+    address_line1: String,
+    address_line2: Option<String>,
+    city: String,
+    state: String,
+    postal_code: String,
+    country: String,
+    mobile_number: String,
+}
+
+#[derive(Serialize, FromRow)]
 struct Product {
     id: i32,
     name: String,
@@ -55,6 +69,19 @@ pub struct LoginUserBody {
     pub username: Option<String>,
     pub email: Option<String>,
     pub password: String,
+}
+
+#[derive(Deserialize)]
+pub struct ShippingAddressBody {
+    pub user_id: i32,
+    pub username: String,
+    pub address_line1: String,
+    pub address_line2: Option<String>,
+    pub city: String,
+    pub state: String,
+    pub postal_code: String,
+    pub country: String,
+    pub mobile_number: String,
 }
 
 #[derive(Deserialize)]
@@ -115,9 +142,53 @@ async fn create_tables_if_not_exist(pool: &sqlx::PgPool) -> Result<(), sqlx::Err
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (product_id) REFERENCES products(id)
         );
+        CREATE TABLE IF NOT EXISTS shipping_addresses (
+            id SERIAL PRIMARY KEY,
+            user_id INT NOT NULL,
+            username VARCHAR(255) NOT NULL,
+            address_line1 VARCHAR(255) NOT NULL,
+            address_line2 VARCHAR(255),
+            city VARCHAR(255) NOT NULL,
+            state VARCHAR(255) NOT NULL,
+            postal_code VARCHAR(20) NOT NULL,
+            country VARCHAR(255) NOT NULL,
+            mobile_number VARCHAR(20) NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (username) REFERENCES users(username)
+        );
         "#,
     ).await?;
     Ok(())
+}
+
+#[get("/user/{id}")]
+pub async fn get_user(state: Data<AppState>, user_id: Path<i32>) -> impl Responder {
+    match sqlx::query_as::<_, User>(
+        "SELECT id, first_name, last_name, username, email, password FROM users WHERE id = $1"
+    )
+        .bind(user_id.into_inner())
+        .fetch_one(&state.db)
+        .await
+    {
+        Ok(user) => HttpResponse::Ok().json(user),
+        Err(_) => HttpResponse::NotFound().json("User not found"),
+    }
+}
+
+#[get("/users")]
+pub async fn get_all_users(state: Data<AppState>) -> impl Responder {
+    match sqlx::query_as::<_, User>(
+        "SELECT id, first_name, last_name, username, email, password FROM users"
+    )
+        .fetch_all(&state.db)
+        .await
+    {
+        Ok(users) => HttpResponse::Ok().json(users),
+        Err(e) => {
+            eprintln!("Error fetching users: {:?}", e);
+            HttpResponse::InternalServerError().json("Failed to fetch users")
+        },
+    }
 }
 
 #[post("/register")]
@@ -199,6 +270,22 @@ pub async fn login_user(state: Data<AppState>, body: Json<LoginUserBody>) -> imp
     }
 }
 
+#[get("/products")]
+pub async fn list_products(state: Data<AppState>) -> impl Responder {
+    match sqlx::query_as::<_, Product>(
+        "SELECT id, name, category, brand, quantity, price FROM products"
+    )
+        .fetch_all(&state.db)
+        .await
+    {
+        Ok(products) => HttpResponse::Ok().json(products),
+        Err(e) => {
+            eprintln!("Error fetching products: {:?}", e);
+            HttpResponse::InternalServerError().json("Failed to fetch products")
+        },
+    }
+}
+
 #[post("/add_product")]
 pub async fn add_product(state: Data<AppState>, body: Json<AddProductBody>) -> impl Responder {
     match sqlx::query_as::<_, Product>(
@@ -216,22 +303,6 @@ pub async fn add_product(state: Data<AppState>, body: Json<AddProductBody>) -> i
         Err(e) => {
             eprintln!("Error adding product: {:?}", e);
             HttpResponse::InternalServerError().json("Failed to add product")
-        },
-    }
-}
-
-#[get("/products")]
-pub async fn list_products(state: Data<AppState>) -> impl Responder {
-    match sqlx::query_as::<_, Product>(
-        "SELECT id, name, category, brand, quantity, price FROM products"
-    )
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(products) => HttpResponse::Ok().json(products),
-        Err(e) => {
-            eprintln!("Error fetching products: {:?}", e);
-            HttpResponse::InternalServerError().json("Failed to fetch products")
         },
     }
 }
@@ -375,32 +446,44 @@ pub async fn checkout(state: Data<AppState>, body: Json<PurchaseBody>) -> impl R
     HttpResponse::Ok().json("Checkout successful")
 }
 
-#[get("/user/{id}")]
-pub async fn get_user(state: Data<AppState>, user_id: Path<i32>) -> impl Responder {
-    match sqlx::query_as::<_, User>(
-        "SELECT id, first_name, last_name, username, email, password FROM users WHERE id = $1"
+#[post("/shipping_address/add")]
+pub async fn add_shipping_address(state: Data<AppState>, body: Json<ShippingAddressBody>) -> impl Responder {
+    match sqlx::query_as::<_, ShippingAddress>(
+        "INSERT INTO shipping_addresses (user_id, username, address_line1, address_line2, city, state, postal_code, country, mobile_number) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, user_id, username, address_line1, address_line2, city, state, postal_code, country, mobile_number"
     )
-    .bind(user_id.into_inner())
-    .fetch_one(&state.db)
-    .await
+        .bind(&body.user_id)
+        .bind(&body.username)
+        .bind(&body.address_line1)
+        .bind(&body.address_line2)
+        .bind(&body.city)
+        .bind(&body.state)
+        .bind(&body.postal_code)
+        .bind(&body.country)
+        .bind(&body.mobile_number)
+        .fetch_one(&state.db)
+        .await
     {
-        Ok(user) => HttpResponse::Ok().json(user),
-        Err(_) => HttpResponse::NotFound().json("User not found"),
+        Ok(address) => HttpResponse::Ok().json(address),
+        Err(e) => {
+            eprintln!("Error adding shipping address: {:?}", e);
+            HttpResponse::InternalServerError().json("Failed to add shipping address")
+        },
     }
 }
 
-#[get("/users")]
-pub async fn get_all_users(state: Data<AppState>) -> impl Responder {
-    match sqlx::query_as::<_, User>(
-        "SELECT id, first_name, last_name, username, email, password FROM users"
+#[get("/shipping_address/{username}")]
+pub async fn get_shipping_address(state: Data<AppState>, username: Path<String>) -> impl Responder {
+    match sqlx::query_as::<_, ShippingAddress>(
+        "SELECT id, user_id, username, address_line1, address_line2, city, state, postal_code, country, mobile_number FROM shipping_addresses WHERE username = $1"
     )
-    .fetch_all(&state.db)
-    .await
+        .bind(username.into_inner())
+        .fetch_all(&state.db)
+        .await
     {
-        Ok(users) => HttpResponse::Ok().json(users),
+        Ok(addresses) => HttpResponse::Ok().json(addresses),
         Err(e) => {
-            eprintln!("Error fetching users: {:?}", e);
-            HttpResponse::InternalServerError().json("Failed to fetch users")
+            eprintln!("Error fetching shipping addresses: {:?}", e);
+            HttpResponse::InternalServerError().json("Failed to fetch shipping addresses")
         },
     }
 }
