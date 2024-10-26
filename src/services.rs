@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{self, FromRow, Executor};
 use crate::AppState;
 use argon2::{self, Config};
+use crate::jwt::generate_jwt;
 
 #[derive(Serialize, FromRow)]
 struct User {
@@ -187,7 +188,9 @@ pub async fn login_user(state: Data<AppState>, body: Json<LoginUserBody>) -> imp
     match user {
         Ok(user) => {
             if argon2::verify_encoded(&user.password, body.password.as_bytes()).unwrap() {
-                HttpResponse::Ok().json(user)
+                let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+                let token = generate_jwt(&user.username, &secret);
+                HttpResponse::Ok().json(token)
             } else {
                 HttpResponse::Unauthorized().json("Invalid credentials")
             }
