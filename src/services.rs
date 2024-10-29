@@ -96,8 +96,6 @@ pub struct AddProductBody {
 #[derive(Deserialize)]
 pub struct PurchaseBody {
     pub user_id: i32,
-    pub product_id: i32,
-    pub quantity: i32,
 }
 
 #[derive(Deserialize)]

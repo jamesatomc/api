@@ -1,10 +1,10 @@
 [package]
 name = "api"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
+# Path: Cargo.toml
 [dependencies]
-
 tokio = { version = "1.41.0", features = ["full"] }
 sqlx = { version = "0.8.2", features = ["postgres", "runtime-tokio-rustls"] }
 serde = { version = "1.0.132", features = ["derive"] }
